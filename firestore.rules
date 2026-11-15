@@ -1,0 +1,66 @@
+rules_version = '2';
+
+// Direct customer leads posted from the FreeLeads app.
+// Clients sign in anonymously to read the feed
+// (FirestoreService.ensureSignedIn); posting needs a Google account
+// (FirestoreService.signInWithGoogle). Every write carries a uid and can
+// only touch the author's own documents.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /leads/{leadId} {
+      allow read: if request.auth != null;
+
+      allow create: if request.auth != null
+        && request.auth.token.firebase.sign_in_provider == 'google.com'
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.source == 'internal'
+        && isValidLead(request.resource.data);
+
+      allow update: if request.auth != null
+        && resource.data.authorId == request.auth.uid
+        && request.resource.data.authorId == resource.data.authorId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && isValidLead(request.resource.data);
+
+      allow delete: if request.auth != null
+        && resource.data.authorId == request.auth.uid;
+    }
+
+    // Each user's saved search preferences (FirestoreService.saveProfile).
+    // Private to that user.
+    match /users/{uid} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+
+      allow create, update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(
+            ['profession', 'zipCode', 'radiusMiles', 'updatedAt'])
+        && request.resource.data.profession is string
+        && request.resource.data.profession.size() > 0
+        && request.resource.data.profession.size() <= 60
+        && request.resource.data.zipCode is string
+        && request.resource.data.zipCode.matches('^[0-9]{5}$')
+        && request.resource.data.radiusMiles is int
+        && request.resource.data.radiusMiles >= 1
+        && request.resource.data.radiusMiles <= 100
+        && request.resource.data.updatedAt == request.time;
+    }
+  }
+
+  function isValidLead(data) {
+    return data.keys().hasOnly([
+        'title', 'description', 'category', 'location', 'zipCode',
+        'zipPrefix', 'price', 'budget', 'contactInfo', 'sourceUrl',
+        'authorId', 'source', 'postedAt', 'createdAt'])
+      && data.title is string && data.title.size() > 0 && data.title.size() <= 120
+      && data.description is string && data.description.size() <= 4000
+      && data.category is string && data.category.size() <= 60
+      && data.location is string && data.location.size() <= 120
+      && data.zipCode is string && data.zipCode.matches('^[0-9]{5}$')
+      && data.zipPrefix == data.zipCode[0:3]
+      && (data.price == null || (data.price is number && data.price >= 0))
+      && (data.budget == null || (data.budget is string && data.budget.size() <= 80))
+      && data.contactInfo is string && data.contactInfo.size() <= 200;
+  }
+}
